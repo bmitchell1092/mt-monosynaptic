@@ -14,7 +14,7 @@ The code is in this repo. The data file is **not** — at 235 MB it exceeds GitH
 per-file limit, so it is hosted separately.
 
 1. Download **`katniss_251120_units.mat`**:
-   `<PASTE DROPBOX LINK HERE>`
+   `https://www.dropbox.com/scl/fo/xhiozlkeaml3a1p8uwaqu/AEP9oIbPFCQ5XFAoxmJzUUM?rlkey=ei9s6i03sidmtl6a7qfvk9u7d&st=wlg7rj1w&dl=0`
 2. Put it in the `data/` folder of your clone:
 
 ```
