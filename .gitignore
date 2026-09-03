@@ -1,0 +1,7 @@
+data/*
+!data/.gitkeep
+figures/
+statistics/
+*.asv
+*.mat.bak
+slprj/
