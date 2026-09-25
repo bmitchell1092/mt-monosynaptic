@@ -1,2 +1,7 @@
-Put katniss_251120_units.mat in this folder.
-See the "Getting the data" section of the README for the download link.
+Put the session file(s) in this folder, one per session:
+
+  katniss_251120_units.mat    301 units, 176 passQC   (76 MB)
+  katniss_251121_units.mat    217 units, 112 passQC   (52 MB)
+
+All session files have identical fields. See the "Getting the data" section of the
+README for the download link.

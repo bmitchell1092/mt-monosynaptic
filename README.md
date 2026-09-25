@@ -1,233 +1,182 @@
 # Katniss MT — Neuropixels units
 
-Spiking data from area MT in a common marmoset (Callithrix jacchus), recorded with a
-Neuropixels 1.0 probe. One session, 100 minutes, 702 units.
+Spiking data from area MT in a common marmoset (*Callithrix jacchus*), Neuropixels 1.0, acute,
+384 sites, 30 kHz. One `.mat` file per session, ~100 min each. Every file has identical fields.
 
-Everything is in a single file. There is no pipeline to run and no sorting to clean up —
-the spike sorter's clusters have already been resolved into units.
+This page defines the terms and the datasets. Nothing here needs installing.
+
+---
+
+## The sessions
+
+| | 251120 | 251121 |
+|---|---|---|
+| units (base set) | 301 | 217 |
+| **`passQC`** | **176** | **112** |
+| duration | 100.2 min | 95.8 min |
+| `restPre` (screen ON) | 0.6 min | 10.1 min |
+| `task` | 69.6 min | 55.2 min |
+| `restPost` (screen OFF) | 30.0 min | 30.6 min |
+| task blocks | bistable, flash, bistable control | **+ RF mapping** |
+| laminar `botChan`–`topChan` (`sink_ch`) | 117–292 (212) | 111–280 (208) |
+
+Separate probe insertions, so **unit `id`s are not comparable across sessions** — `id` 191 in one
+file is a different neuron from `id` 191 in the other. Take laminar bounds from each session's
+own `session.laminar`.
+
+```matlab
+units = loadUnits('Session', '251121', 'OnlyQC', true, 'Epoch', 'task');
+```
+
+`loadUnits` options: `'Session'`, `'OnlyQC'`, `'Epoch'` (`'all'` | `'restPre'` | `'task'` |
+`'restPost'` | `[t0 t1]`), `'MinSpikes'`, `'MaxPctRefr'`, `'File'`. With one file in `data/` it
+loads with no arguments; with several, `'Session'` is required and the error lists them.
+
+---
+
+## `units` — 1 × nUnits struct array
+
+| Field | Meaning |
+|---|---|
+| `id` | cluster id as Kilosort numbered it, 0-based. Not comparable across sessions |
+| `spikes` | `[n × 1]` spike times in **seconds**, absolute from the start of the recording |
+| `nSpikes`, `firingRate` | count and spikes/s **in the epoch you loaded** |
+| `channel` | probe channel with the largest waveform, 0-based |
+| `depth_um` | depth along the probe, µm |
+| `x_um`, `y_um` | position of that channel on the probe, µm |
+| `pctRefr` | measured % of ISIs under 1.5 ms, **for the epoch you loaded**. See below |
+| `ksLabel` | Kilosort's **automatic** call, `'good'` or `'mua'`. Not a human judgement |
+| `contamPct` | Kilosort's model contamination estimate. **Not bounded at 100**. See below |
+| `passQC` | **the recommended unit selection.** Same in every epoch. See below |
+| `waveform` | `[52 × 1]` mean waveform on the peak channel |
+
+Spike times stay **absolute** when you restrict to an epoch, so they always line up with
+`events.times_s` — no conversion, ever.
+
+## `session`
+
+`id`, `subject`, `date`, `area`, `probe`, `fs`, `duration_s`, `nUnits`, `nClustersSorted`,
+`epochs`, `epochNotes`, `curation`, `exported`, plus:
+
+- **`session.laminar`** — `botChan`, `topChan` (channels strictly between the two are inside
+  cortex), `sink_ch` (CSD-estimated input layer). Every unit in the file is already inside the
+  bounds. The granular layer was placed by hand, so layer assignment is approximate.
+- **`session.qcCriteria`** — the definition behind `passQC`: `expression`, `maxPctRefr` (2),
+  `minSpikes` (1000), `requireInCortex`, `excludeDuplicates`, `epochInvariant`, `computedOver`,
+  `nPass`, `note`.
+- **`session.epochs`** — `restPre`, `task`, `restPost`, each `[t0 t1]` in seconds.
+
+## `events`
+
+`times_s` and `codes` (matched vectors), `codeMeaning`, `codeCounts`, `note`. Event times are on
+the **same clock as the spikes**.
+
+| Code | Meaning | 251120 | 251121 |
+|---|---|---|---|
+| 9 | trial start | 1341 | 993 |
+| 10 | fixation acquired | 1341 | 993 |
+| **11** | **stimulus on** — the alignment event | **487** | **1324** |
+| 12 | stimulus off | 275 | 1078 |
+| 18 | trial end / ITI | 1342 | 994 |
+
+Other codes occur and are not established here (3/20/21/25 on 251120; also 22/26/27 on 251121).
+**`events.codeCounts` gives `[code, count]` for every code in the file you loaded.**
+
+---
+
+## The three terms worth defining
+
+### `passQC` — the recommended unit selection
+
+`pctRefr < 2` **and** `nSpikes > 1000` **and** not a sorting duplicate **and** inside the
+laminar bounds, i.e. the standard connectivity criteria. **176 units on 251120, 112 on 251121.**
+`'OnlyQC', true` applies it.
+
+The base set behind it (301 / 217) is the clusters a manual waveform screen accepted. That
+screen looked at waveform shape and depth, **not** at refractory periods — which is why 91 of
+251120's 301 still violate 2%, and why `passQC` exists.
+
+**`passQC` is identical in every epoch, on purpose.** It is computed once over the whole
+recording and never recomputed on a sub-window, because isolation is a property of the unit
+rather than of the window you analyse: the 100-minute `pctRefr` uses every spike and is the best
+estimate available, while a 30-minute estimate of the same quantity is *noisier*, not stricter.
+It also means `uTask(k)` and `uRest(k)` are guaranteed to be the same neuron, so task-versus-rest
+is a clean within-neuron comparison. If you need *enough spikes in one window* to compute
+something, that is a power criterion — use `'MinSpikes'` after choosing the epoch.
+
+### `pctRefr` — measured refractory violations
+
+```
+pctRefr = 100 × (ISIs shorter than 1.5 ms) / (all ISIs)
+```
+
+A plain count, no model. A neuron is absolutely refractory for ~1–2 ms, so a shorter interval
+cannot have come from one neuron: either two neurons are in the cluster, or one spike was counted
+twice. Both are what manufacture a fake short-latency CCG peak, which is why this is the metric
+to threshold on. **0% ideal, under 1% clean, 2% and above suspect.** Recomputed per epoch.
+
+⚠️ **Not chance-corrected, so it is biased against fast units.** A Poisson train at rate *r*
+shows `1 − exp(−r × 0.0015)` even when perfectly isolated — 1.49% at 10 Hz, **2.96% at 20 Hz**,
+5.82% at 40 Hz. A flawless 20 Hz neuron fails a 2% cut on rate alone. If a result turns on the
+fastest units, compare each unit against its own chance level rather than a fixed threshold.
+
+### `contamPct` — Kilosort's model estimate
+
+Kilosort's own number, passed through. Estimates the fraction of spikes in the cluster that do
+not belong to it, from the autocorrelogram's density at short lags against its long-lag
+asymptote. ⚠️ **Not a bounded percentage** — it ranges 0 to 1786 here; above 100 means no
+refractory dip at all. Correlates with `pctRefr` (Spearman ρ = 0.83) but is not interchangeable.
+`ksLabel` is roughly `contamPct < 20`.
+
+**Use `pctRefr` for connectivity work** — it is a measurement, not a model output, so a threshold
+on it means something statable. Keep `contamPct` as a second opinion.
+
+---
+
+## Four things that will produce wrong answers
+
+**1. No cluster has ever been merged or split.** The boundaries are Kilosort 4's exactly as the
+sorter drew them — `cluster_group.tsv` marks everything "good" and the one manual Phy pass was
+fully reverted. So one neuron split across two clusters is still split, and such a pair shows an
+enormous peak at **~0 ms lag**. A chemical synapse cannot act at 0 ms: read a strong near-zero
+peak as a **merge candidate, not a connection**. (`passQC` removes only the most blatant cases,
+where two clusters were near-copies.)
+
+**2. Code 11 is not one per trial, and the ratio differs by session.** 251120 has 487 stimulus
+events for 1341 trial starts (0.36 per trial — fixation breaks). **251121 has 1324 for 993 —
+more stimuli than trials**, because its RF-mapping block fires code 11 once per stimulus. Never
+assume one stimulus per trial, and never pool code-11 events across blocks: on 251121 they mix RF
+probes with bistable motion, so a PSTH over all of them is not comparable to 251120's.
+
+**3. `restPre` and `restPost` are different conditions** — screen ON versus screen OFF. Do not
+pool them. Durations vary a lot by session; 251120 has effectively no `restPre` (0.6 min). Asking
+for an empty window raises an error rather than returning nothing.
+
+**4. `unitIdx` is not `id`.** `plotEvokedSpikes(units, events, k)` takes an **index into
+`units`**, and filtering changes indices. Use `k = find([units.id] == 191)`.
 
 ---
 
 ## Getting the data
 
-The code is in this repo. The data file is **not** — at 235 MB it exceeds GitHub's 100 MB
-per-file limit, so it is hosted separately.
-
-1. Download **`katniss_251120_units.mat`**:
-   `https://www.dropbox.com/scl/fo/xhiozlkeaml3a1p8uwaqu/AEP9oIbPFCQ5XFAoxmJzUUM?rlkey=ei9s6i03sidmtl6a7qfvk9u7d&st=wlg7rj1w&dl=0`
-2. Put it in the `data/` folder of your clone:
+The `.mat` files are not in version control. Download them from
+[Dropbox](https://www.dropbox.com/scl/fo/xhiozlkeaml3a1p8uwaqu/AEP9oIbPFCQ5XFAoxmJzUUM?rlkey=ei9s6i03sidmtl6a7qfvk9u7d&st=wlg7rj1w&dl=0)
+into `data/`:
 
 ```
 mt-monosynaptic/
 └── data/
-    └── katniss_251120_units.mat
+    ├── katniss_251120_units.mat
+    └── katniss_251121_units.mat
 ```
 
-That is the entire setup. `loadUnits` looks there by default; pass `'File'` to point it
-somewhere else.
+**`plotEvokedSpikes(units, events, unitIdx)`** is the only other function here — raster and PSTH
+for one unit, aligned to `'AlignCode'` (default 11) over `'Window'` (default `[-200 500]` ms).
+Returns `[psth, t_ms, raster]`, and takes `'Plot', false` to run headless. Needs the `task`
+epoch; the rest blocks have no stimuli to align to.
 
----
+## Provenance
 
-## Quickstart
-
-```matlab
-[units, session, events] = loadUnits('Epoch', 'task');
-
-% the most active unit, aligned to stimulus onset
-[~, ord] = sort([units.firingRate], 'descend');
-plotEvokedSpikes(units, events, ord(1));
-```
-
-Needs MATLAB. No toolboxes, no dependencies.
-
----
-
-## The recording
-
-| | |
-|---|---|
-| Subject | `katniss`, common marmoset |
-| Area | MT |
-| Probe | Neuropixels 1.0, acute, 384 sites |
-| Sampling rate | 30 kHz |
-| Duration | 6012.7 s (100.2 min), continuous |
-| Units | 702 |
-| Spikes | 56,188,186 |
-
-### Two epochs
-
-The recording has a task block followed by a task-free block, and they are worth analysing
-separately. `session.epochs` carries both windows.
-
-| Epoch | Window (s) | Duration | What happened |
-|---|---|---|---|
-| `task` | 0 – 4211.4 | 70.2 min | visual stimuli: bistable motion, bistable control, screen flashes |
-| `spontaneous` | 4211.4 – 6012.7 | **30.0 min** | screen off, no task, animal simply sitting |
-
-Same units in both — the unit set was determined once over the whole recording, so anything
-you compute in one epoch is directly comparable to the other.
-
-```matlab
-uTask  = loadUnits('Epoch', 'task');
-uSpont = loadUnits('Epoch', 'spontaneous');
-```
-
----
-
-## Data structures
-
-### `units` — 1 × 702 struct array
-
-| Field | Type | Meaning |
-|---|---|---|
-| `id` | scalar | unit identifier |
-| `spikes` | `[n × 1]` | **spike times in SECONDS**, from the start of the recording |
-| `nSpikes` | scalar | number of spikes |
-| `firingRate` | scalar | spikes/s over the epoch |
-| `channel` | scalar | probe channel where the unit's waveform is largest (0-based) |
-| `depth_um` | scalar | depth along the probe, µm |
-| `x_um`, `y_um` | scalar | position of that channel on the probe, µm |
-| `pctRefr` | scalar | % of inter-spike intervals shorter than 1.5 ms — a contamination measure. A clean single unit is under ~1%. |
-| `ksLabel` | char | the sorter's own call: `'good'` or `'mua'` |
-| `contamPct` | scalar | the sorter's contamination estimate |
-| `mergedFrom` | `[k × 1]` | original cluster ids combined into this unit. One entry = never merged. |
-| `waveform` | `[52 × 1]` | mean spike waveform on the peak channel |
-
-Spike times are **absolute** and stay absolute when you restrict to an epoch, so they always
-line up with `events.times_s`.
-
-### `session`
-
-`id`, `subject`, `date`, `area`, `probe`, `fs`, `duration_s`, `nUnits`, `epochs`,
-`epochNotes`, `curation` (what was done to the clusters), `exported`, and:
-
-`session.laminar` — where cortex is along the probe:
-
-| Field | Value | Meaning |
-|---|---|---|
-| `botChan` | 117 | channels strictly between these two are inside cortex |
-| `topChan` | 292 | |
-| `sink_ch` | 212 | CSD-estimated input layer |
-
-```matlab
-inCortex = [units.channel] > session.laminar.botChan ...
-         & [units.channel] < session.laminar.topChan;
-```
-
-The granular layer was placed by hand on a CSD from Nick Dotson, so treat layer assignment as approximate here.
-
-### `events` — behavioural events
-
-| Field | Meaning |
-|---|---|
-| `times_s` | `[5190 × 1]` event times, in seconds |
-| `codes` | `[5190 × 1]` matching event codes |
-| `codeMeaning` | lookup table for the codes below |
-
-| Code | Count | Meaning |
-|---|---|---|
-| 9 | 1341 | trial start |
-| 10 | 1341 | fixation acquired |
-| **11** | **487** | **stimulus on** — align to this one |
-| 12 | 275 | stimulus off |
-| 18 | 1342 | trial end / inter-trial interval |
-
-Codes 3, 20, 21 and 25 also appear; their meanings are not established here.
-
-Event times are on the **same clock as the spikes**, so no conversion is needed:
-
-```matlab
-stimOn = events.times_s(events.codes == 11);
-n = sum(units(1).spikes > stimOn(1) & units(1).spikes < stimOn(1) + 0.2);
-```
-
----
-
-## Functions
-
-**`loadUnits`** — options: `'Epoch'` (`'all'` | `'task'` | `'spontaneous'` | `[t0 t1]`),
-`'MinSpikes'`, `'MaxPctRefr'`, `'File'`.
-
-```matlab
-units = loadUnits('Epoch', 'task', 'MinSpikes', 1000, 'MaxPctRefr', 2);
-```
-
-**`plotEvokedSpikes(units, events, unitIdx)`** — raster and PSTH for one unit. Options:
-`'AlignCode'` (default 11), `'Window'` (default `[-200 500]` ms), `'BinMs'` (default 10),
-`'Plot'`. Returns `[psth, t_ms, raster]`, so it also works headless with `'Plot', false`.
-
- **Needs the `task` epoch.** The `spontaneous` block is screen-off — it contains no
-stimuli, so there is nothing to align to and every raster comes out empty. The function
-raises a clear error if you try. All 487 stimulus events fall between 38.8 s and 4206.0 s.
-
-`unitIdx` is an **index into `units`**, not a cluster id. They are different numbers, and
-filtering changes the indices. To go from an id:
-
-```matlab
-k = find([units.id] == 191);
-plotEvokedSpikes(units, events, k);
-```
-
-If a plot comes up empty, check that first — then run with `'Plot', false` and inspect the
-returned `psth`. Numbers there but a blank figure means a graphics problem, not a data one.
-
----
-
-## About this NeuroPixel dataset (1 session)
-
-**Only 487 of 1341 trials reached stimulus onset.** The animal broke fixation on most
-trials. Align to code 11 and you automatically get only the trials that happened; count
-trials from code 9 and you will overcount by roughly 3×.
-
-**Firing rates differ a lot between the two epochs.** Units are less active in the 30-minute
-screen-off block, so anything spike-count-dependent has less statistical power there. Check
-`[units.nSpikes]` for the epoch you are actually using rather than assuming.
-
----
-
-## Analysing monosynaptic pairs
-
-The goal: find pairs where one neuron drives the other, from a short-latency peak in their
-cross-correlogram. The method and code are in **`CCG Connectivity Code`** (P. Jendritza) —
-a separate repo. 
-
-**Probably step 1. Write the adapter.** The pipeline wants a `clu` struct. Everything it needs is here:
-
-| It wants | You give it |
-|---|---|
-| `spkTU` | `{units.spikes}` |
-| `cluster_id`, `ch`, `n_spikes`, `pctRefr` | `units.id`, `.channel`, `.nSpikes`, `.pctRefr` |
-| `spike_position_median_X` / `_Y` | `units.x_um`, `units.y_um` |
-| `isDoublCountedUnit` | all `false` — already resolved |
-| `sink_ch`, `botChanM`, `topChanM` | `session.laminar` |
-
-Plus a `cfg` with `sessionID`, `sessionDate`, `datapath`, `codeDir`. About 20 lines.
-
-**2. Two code hang-ups from patrick's code** `getConnectivitySTA.m:112` calls `toc` with its
-only `tic` commented out, and line 294 saves into a folder it never creates. Call `tic` and
-`mkdir` first.
-
-**3. Run the main functions.** `getConnectivitySTA` then `getSignifPeaks_CCG`. On the task epoch with
-`pctRefr < 2` inside the cortex bounds that should give you **~200 units, ~43,000 ordered pairs** — a few
-minutes, under a gigabyte.
-
-**4. On my dry-run, I noticed most of the output is throwaway** A comparable run (183
-units) returned **928 "significant" pairs — 62.5% of them at exactly 0 ms lag.** A chemical
-synapse cannot act at 0 ms as you know, so you can exclude those as candidates.
-
-**5. Interesting to do** 
-Compare `task` against `spontaneous` on the same units. 
-Layer connectivity via `session.laminar`. 
-Efficacy versus distance via `x_um` / `y_um`.
-
----
-
-## Where the data came from
-
-Kilosort 4 → Phy, from the raw Neuropixels recording. The full processing pipeline, the
-curation that produced these units, and the ECoG recorded simultaneously with them all live
-in the `mt-ecog-npx` repository. Ask if you need any of it — none of it is required to work
-with this file.
-
-`data/katniss_251120_units.mat` is 235 MB and is not in version control — see **Getting the
-data** at the top.
+Kilosort 4 on the raw Neuropixels recording, then a manual waveform screen. The full pipeline,
+and the ECoG recorded simultaneously with these spikes, live in the **`mt-ecog-npx`** repository
+(`ingest/kilosort/exportUnits.m` wrote these files). Ask if you need any of it.
